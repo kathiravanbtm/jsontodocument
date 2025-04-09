@@ -1,8 +1,11 @@
 import { TemplateHandler } from "https://cdn.jsdelivr.net/npm/easy-template-x/+esm";
 
+let currentTags = [];
+let currentTemplateFile = null;
+
 document.addEventListener("DOMContentLoaded", function () {
-    document.getElementById("generateDocx").addEventListener("click", generateDocx);
     document.getElementById("extractTags").addEventListener("click", extractTags);
+    document.getElementById("generateFromForm").addEventListener("click", handleFormSubmission);
 });
 
 async function extractTags() {
@@ -12,17 +15,20 @@ async function extractTags() {
         return;
     }
 
+    currentTemplateFile = docxInput; // Save for later use
+
     const reader = new FileReader();
     reader.onload = async function (event) {
         try {
             const templateData = event.target.result;
             const handler = new TemplateHandler();
             const tags = await handler.parseTags(templateData);
-            console.log(tags);
-            // Extract only tag names (ignoring extra metadata)
-            const tagNames = tags.map(tag => tag.raw);
 
-            console.log(JSON.stringify(tagNames, null, 2));
+            currentTags = tags.map(tag => tag.rawText);
+
+            console.log("Extracted tags:", currentTags);
+
+            generateDynamicForm(currentTags);
         } catch (error) {
             console.error("Error extracting tags:", error);
             alert("Failed to extract placeholders.");
@@ -31,47 +37,54 @@ async function extractTags() {
     reader.readAsArrayBuffer(docxInput);
 }
 
-async function generateDocx() {
-    const docxInput = document.getElementById("docxTemplate").files[0];
-    const jsonInput = document.getElementById("jsonFile").files[0];
-    const jsonTextArea = document.getElementById("jsonInput").value;
+function generateDynamicForm(tags) {
+    const formContainer = document.getElementById("dynamicForm");
+    formContainer.innerHTML = ""; // Clear previous form
 
-    if (!docxInput) {
-        alert("Please upload a DOCX template.");
-        return;
-    }
+    tags.forEach(tag => {
+        const label = document.createElement("label");
+        label.textContent = `Enter value for "${tag}":`;
+        label.htmlFor = tag;
 
-    let jsonData;
-    if (jsonInput) {
-        jsonData = await readFileAsJSON(jsonInput);
-    } else {
-        try {
-            jsonData = JSON.parse(jsonTextArea);
-        } catch (error) {
-            alert("Invalid JSON format.");
-            return;
-        }
-    }   
+        const input = document.createElement("input");
+        input.type = "text";
+        input.id = tag;
+        input.name = tag;
+        input.required = true;
 
-    processTemplate(docxInput, jsonData);
-}
-
-async function readFileAsJSON(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(JSON.parse(reader.result));
-        reader.onerror = reject;
-        reader.readAsText(file);
+        formContainer.appendChild(label);
+        formContainer.appendChild(document.createElement("br"));
+        formContainer.appendChild(input);
+        formContainer.appendChild(document.createElement("br"));
+        formContainer.appendChild(document.createElement("br"));
     });
 }
 
-async function processTemplate(docxFile, jsonData) {
+async function handleFormSubmission(event) {
+    event.preventDefault();
+
+    if (!currentTemplateFile) {
+        alert("Please upload and extract tags from a DOCX template first.");
+        return;
+    }
+
+    const formData = new FormData(document.getElementById("dynamicForm"));
+    const dataObject = {};
+
+    currentTags.forEach(tag => {
+        dataObject[tag] = formData.get(tag) || "";
+    });
+
+    processTemplate(currentTemplateFile, dataObject);
+}
+
+async function processTemplate(docxFile, dataObject) {
     const reader = new FileReader();
     reader.onload = async function (event) {
         try {
             const templateData = event.target.result;
             const handler = new TemplateHandler();
-            const outputDoc = await handler.process(templateData, jsonData);
+            const outputDoc = await handler.process(templateData, dataObject);
 
             const blob = new Blob([outputDoc], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
             saveFile("ProcessedDocument.docx", blob);
@@ -85,7 +98,7 @@ async function processTemplate(docxFile, jsonData) {
 
 function saveFile(filename, blob) {
     const blobUrl = URL.createObjectURL(blob);
-    let link = document.createElement("a");
+    const link = document.createElement("a");
     link.download = filename;
     link.href = blobUrl;
     document.body.appendChild(link);
